@@ -1,9 +1,10 @@
-"""Tests for IPC modules (FIFO, UDS, messages)."""
+"""Tests for IPC modules (FIFO, UDS, messages, interfaces, factory)."""
 
 import os
 import tempfile
 import threading
 import time
+from abc import ABC
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,13 @@ import numpy as np
 from visualbase.core.frame import Frame
 from visualbase.ipc.fifo import FIFOVideoWriter, FIFOVideoReader, HEADER_SIZE
 from visualbase.ipc.uds import UDSServer, UDSClient
+from visualbase.ipc.interfaces import (
+    VideoReader,
+    VideoWriter,
+    MessageReceiver,
+    MessageSender,
+)
+from visualbase.ipc.factory import TransportFactory
 from visualbase.ipc.messages import (
     FaceData,
     PoseData,
@@ -343,3 +351,245 @@ class TestFIFO:
 
             writer.close()
             reader.close()
+
+
+class TestInterfaces:
+    """Tests for IPC interfaces (ABCs)."""
+
+    def test_video_reader_is_abc(self):
+        """VideoReader is an abstract base class."""
+        assert issubclass(VideoReader, ABC)
+        # Cannot instantiate ABC
+        with pytest.raises(TypeError):
+            VideoReader()
+
+    def test_video_writer_is_abc(self):
+        """VideoWriter is an abstract base class."""
+        assert issubclass(VideoWriter, ABC)
+        with pytest.raises(TypeError):
+            VideoWriter()
+
+    def test_message_receiver_is_abc(self):
+        """MessageReceiver is an abstract base class."""
+        assert issubclass(MessageReceiver, ABC)
+        with pytest.raises(TypeError):
+            MessageReceiver()
+
+    def test_message_sender_is_abc(self):
+        """MessageSender is an abstract base class."""
+        assert issubclass(MessageSender, ABC)
+        with pytest.raises(TypeError):
+            MessageSender()
+
+    def test_fifo_reader_implements_video_reader(self):
+        """FIFOVideoReader implements VideoReader interface."""
+        assert issubclass(FIFOVideoReader, VideoReader)
+        # Check required methods exist
+        reader = FIFOVideoReader("/tmp/test.mjpg")
+        assert hasattr(reader, "open")
+        assert hasattr(reader, "read")
+        assert hasattr(reader, "close")
+        assert hasattr(reader, "is_open")
+
+    def test_fifo_writer_implements_video_writer(self):
+        """FIFOVideoWriter implements VideoWriter interface."""
+        assert issubclass(FIFOVideoWriter, VideoWriter)
+        writer = FIFOVideoWriter("/tmp/test.mjpg")
+        assert hasattr(writer, "open")
+        assert hasattr(writer, "write")
+        assert hasattr(writer, "close")
+        assert hasattr(writer, "is_open")
+
+    def test_uds_server_implements_message_receiver(self):
+        """UDSServer implements MessageReceiver interface."""
+        assert issubclass(UDSServer, MessageReceiver)
+        server = UDSServer("/tmp/test.sock")
+        assert hasattr(server, "start")
+        assert hasattr(server, "recv")
+        assert hasattr(server, "recv_all")
+        assert hasattr(server, "stop")
+        assert hasattr(server, "is_running")
+
+    def test_uds_client_implements_message_sender(self):
+        """UDSClient implements MessageSender interface."""
+        assert issubclass(UDSClient, MessageSender)
+        client = UDSClient("/tmp/test.sock")
+        assert hasattr(client, "connect")
+        assert hasattr(client, "send")
+        assert hasattr(client, "disconnect")
+        assert hasattr(client, "is_connected")
+
+
+class TestTransportFactory:
+    """Tests for TransportFactory."""
+
+    def test_create_video_reader_fifo(self):
+        """Create FIFO video reader via factory."""
+        reader = TransportFactory.create_video_reader("fifo", "/tmp/test.mjpg")
+        assert isinstance(reader, FIFOVideoReader)
+        assert isinstance(reader, VideoReader)
+
+    def test_create_video_writer_fifo(self):
+        """Create FIFO video writer via factory."""
+        writer = TransportFactory.create_video_writer("fifo", "/tmp/test.mjpg")
+        assert isinstance(writer, FIFOVideoWriter)
+        assert isinstance(writer, VideoWriter)
+
+    def test_create_video_writer_with_kwargs(self):
+        """Create video writer with custom kwargs."""
+        writer = TransportFactory.create_video_writer(
+            "fifo", "/tmp/test.mjpg", jpeg_quality=95
+        )
+        assert isinstance(writer, FIFOVideoWriter)
+        assert writer._jpeg_quality == 95
+
+    def test_create_message_receiver_uds(self):
+        """Create UDS message receiver via factory."""
+        receiver = TransportFactory.create_message_receiver("uds", "/tmp/test.sock")
+        assert isinstance(receiver, UDSServer)
+        assert isinstance(receiver, MessageReceiver)
+
+    def test_create_message_sender_uds(self):
+        """Create UDS message sender via factory."""
+        sender = TransportFactory.create_message_sender("uds", "/tmp/test.sock")
+        assert isinstance(sender, UDSClient)
+        assert isinstance(sender, MessageSender)
+
+    def test_invalid_video_reader_type(self):
+        """Raise error for invalid video reader type."""
+        with pytest.raises(ValueError) as exc_info:
+            TransportFactory.create_video_reader("invalid", "/tmp/test")
+        assert "Unknown video reader transport" in str(exc_info.value)
+
+    def test_invalid_video_writer_type(self):
+        """Raise error for invalid video writer type."""
+        with pytest.raises(ValueError) as exc_info:
+            TransportFactory.create_video_writer("invalid", "/tmp/test")
+        assert "Unknown video writer transport" in str(exc_info.value)
+
+    def test_invalid_message_receiver_type(self):
+        """Raise error for invalid message receiver type."""
+        with pytest.raises(ValueError) as exc_info:
+            TransportFactory.create_message_receiver("invalid", "/tmp/test")
+        assert "Unknown message receiver transport" in str(exc_info.value)
+
+    def test_invalid_message_sender_type(self):
+        """Raise error for invalid message sender type."""
+        with pytest.raises(ValueError) as exc_info:
+            TransportFactory.create_message_sender("invalid", "/tmp/test")
+        assert "Unknown message sender transport" in str(exc_info.value)
+
+    def test_list_video_transports(self):
+        """List available video transports."""
+        transports = TransportFactory.list_video_transports()
+        assert "readers" in transports
+        assert "writers" in transports
+        assert "fifo" in transports["readers"]
+        assert "fifo" in transports["writers"]
+
+    def test_list_message_transports(self):
+        """List available message transports."""
+        transports = TransportFactory.list_message_transports()
+        assert "receivers" in transports
+        assert "senders" in transports
+        assert "uds" in transports["receivers"]
+        assert "uds" in transports["senders"]
+
+    def test_register_custom_video_reader(self):
+        """Register and use custom video reader."""
+
+        class DummyVideoReader(VideoReader):
+            def __init__(self, path):
+                self.path = path
+                self._open = False
+
+            def open(self, timeout_sec=None):
+                self._open = True
+                return True
+
+            def read(self):
+                return None
+
+            def close(self):
+                self._open = False
+
+            @property
+            def is_open(self):
+                return self._open
+
+        TransportFactory.register_video_reader("dummy", DummyVideoReader)
+        reader = TransportFactory.create_video_reader("dummy", "/tmp/test")
+        assert isinstance(reader, DummyVideoReader)
+        assert reader.path == "/tmp/test"
+
+    def test_register_custom_message_sender(self):
+        """Register and use custom message sender."""
+
+        class DummyMessageSender(MessageSender):
+            def __init__(self, path):
+                self.path = path
+                self._connected = False
+
+            def connect(self):
+                self._connected = True
+                return True
+
+            def send(self, message):
+                return True
+
+            def disconnect(self):
+                self._connected = False
+
+            @property
+            def is_connected(self):
+                return self._connected
+
+        TransportFactory.register_message_sender("dummy", DummyMessageSender)
+        sender = TransportFactory.create_message_sender("dummy", "/tmp/test")
+        assert isinstance(sender, DummyMessageSender)
+
+
+class TestInterfaceContextManagers:
+    """Tests for interface context manager support."""
+
+    def test_video_reader_context_manager(self):
+        """VideoReader supports context manager via ABC."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fifo_path = os.path.join(tmpdir, "test.mjpg")
+
+            # Setup writer
+            writer = FIFOVideoWriter(fifo_path)
+            writer_thread = threading.Thread(target=writer.open)
+            writer_thread.start()
+
+            time.sleep(0.1)
+
+            # Use reader as context manager (via ABC __enter__/__exit__)
+            reader: VideoReader = FIFOVideoReader(fifo_path)
+            with reader:
+                assert reader.is_open
+            assert not reader.is_open
+
+            writer.close()
+            writer_thread.join(timeout=1.0)
+
+    def test_message_receiver_context_manager(self):
+        """MessageReceiver supports context manager."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sock_path = os.path.join(tmpdir, "test.sock")
+
+            server: MessageReceiver = UDSServer(sock_path)
+            with server:
+                assert server.is_running
+            assert not server.is_running
+
+    def test_message_sender_context_manager(self):
+        """MessageSender supports context manager."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sock_path = os.path.join(tmpdir, "test.sock")
+
+            with UDSServer(sock_path):
+                sender: MessageSender = UDSClient(sock_path)
+                with sender:
+                    assert sender.is_connected
+                assert not sender.is_connected

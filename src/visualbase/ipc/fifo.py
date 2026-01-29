@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 
 from visualbase.core.frame import Frame
+from visualbase.ipc.interfaces import VideoReader, VideoWriter
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +30,13 @@ HEADER_FORMAT = "<IQQ"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
 
-class FIFOVideoWriter:
+class FIFOVideoWriter(VideoWriter):
     """Write video frames to a FIFO (named pipe).
 
     Creates a FIFO at the specified path and writes MJPEG-encoded frames.
     The writer blocks until a reader connects.
+
+    Implements the VideoWriter interface for swappable transport.
 
     Args:
         path: Path to create the FIFO.
@@ -141,10 +144,12 @@ class FIFOVideoWriter:
         return self._fd is not None
 
 
-class FIFOVideoReader:
+class FIFOVideoReader(VideoReader):
     """Read video frames from a FIFO (named pipe).
 
     Opens an existing FIFO and reads MJPEG-encoded frames.
+
+    Implements the VideoReader interface for swappable transport.
 
     Args:
         path: Path to the existing FIFO.

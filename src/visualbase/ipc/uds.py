@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Optional, List
 import logging
 
+from visualbase.ipc.interfaces import MessageReceiver, MessageSender
+
 logger = logging.getLogger(__name__)
 
 # Maximum message size (64KB should be enough for any OBS/TRIG message)
@@ -24,11 +26,13 @@ MAX_MESSAGE_SIZE = 65536
 SOCKET_BUFFER_SIZE = 1024 * 1024  # 1MB
 
 
-class UDSServer:
+class UDSServer(MessageReceiver):
     """Unix Domain Socket datagram server for receiving messages.
 
     Creates a UDS socket at the specified path and receives datagrams.
     Used by C (Fusion) to receive OBS messages and A (Ingest) to receive TRIG.
+
+    Implements the MessageReceiver interface for swappable transport.
 
     Args:
         path: Path to create the socket.
@@ -150,11 +154,13 @@ class UDSServer:
         return str(self._path)
 
 
-class UDSClient:
+class UDSClient(MessageSender):
     """Unix Domain Socket datagram client for sending messages.
 
     Connects to a UDS socket and sends datagrams.
     Used by B* to send OBS messages and C to send TRIG messages.
+
+    Implements the MessageSender interface for swappable transport.
 
     Args:
         path: Path to the target socket.
