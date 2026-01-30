@@ -6,7 +6,9 @@ The Ingest process is the "Time Authority" in the A-B*-C architecture:
 - Distributes proxy streams to extractors via FIFOs
 - Receives TRIG messages and extracts clips
 
-Example:
+Supports interface-based dependency injection for swappable transports.
+
+Example (legacy path-based):
     >>> from visualbase.sources.camera import CameraSource
     >>> from visualbase.streaming.fanout import ProxyConfig
     >>>
@@ -17,6 +19,17 @@ Example:
     ...         ProxyConfig("pose", "/tmp/vid_pose.mjpg", 640, 480, 10),
     ...     ],
     ...     trig_socket="/tmp/trig.sock",
+    ...     clip_output_dir=Path("./clips"),
+    ... )
+    >>> process.run()
+
+Example (interface-based):
+    >>> from visualbase.ipc.factory import TransportFactory
+    >>> trig_receiver = TransportFactory.create_message_receiver("uds", "/tmp/trig.sock")
+    >>> process = IngestProcess(
+    ...     source=CameraSource(0),
+    ...     proxy_configs=[...],
+    ...     trig_receiver=trig_receiver,
     ...     clip_output_dir=Path("./clips"),
     ... )
     >>> process.run()
@@ -32,7 +45,8 @@ import threading
 from visualbase.sources.base import BaseSource
 from visualbase.core.ring_buffer import RingBuffer
 from visualbase.streaming.fanout import ProxyFanout, ProxyConfig
-from visualbase.ipc.uds import UDSServer
+from visualbase.ipc.interfaces import MessageReceiver
+from visualbase.ipc.factory import TransportFactory
 from visualbase.ipc.messages import parse_trig_message, TRIGMessage
 from visualbase.packaging.trigger import Trigger, TriggerType
 from visualbase.packaging.clipper import ClipResult
@@ -48,10 +62,16 @@ class IngestProcess:
     extraction, distributes proxy streams to extractors, and handles
     trigger messages for clip extraction.
 
+    Supports two initialization modes:
+    1. Interface-based: Pass MessageReceiver instance directly
+    2. Legacy path-based: Pass trig_socket path (auto-creates UDS)
+
     Args:
         source: Video source (CameraSource, RTSPSource, etc.).
         proxy_configs: List of proxy output configurations.
-        trig_socket: Path to the UDS socket for receiving TRIG messages.
+        trig_receiver: MessageReceiver instance for receiving TRIG messages.
+        trig_socket: (Legacy) Path to the UDS socket for receiving TRIG messages.
+        message_transport: Transport type for messages ("uds", "zmq"). Default: "uds".
         clip_output_dir: Directory to save extracted clips.
         ring_buffer_retention_sec: Ring buffer retention time in seconds.
         on_clip: Optional callback when a clip is extracted.
@@ -62,23 +82,37 @@ class IngestProcess:
         self,
         source: BaseSource,
         proxy_configs: List[ProxyConfig],
-        trig_socket: str,
         clip_output_dir: Path,
+        trig_receiver: Optional[MessageReceiver] = None,
+        trig_socket: Optional[str] = None,
+        message_transport: str = "uds",
         ring_buffer_retention_sec: float = 120.0,
         on_clip: Optional[Callable[[ClipResult], None]] = None,
         on_frame: Optional[Callable[[Frame], None]] = None,
     ):
         self._source = source
         self._proxy_configs = proxy_configs
-        self._trig_socket = trig_socket
         self._clip_output_dir = Path(clip_output_dir)
         self._ring_buffer_retention_sec = ring_buffer_retention_sec
         self._on_clip = on_clip
         self._on_frame = on_frame
 
+        # Store transport config
+        self._message_transport = message_transport
+        self._trig_path = trig_socket
+
+        # Interface-based or legacy path-based initialization
+        if trig_receiver is not None:
+            self._trig_server: Optional[MessageReceiver] = trig_receiver
+            self._trig_server_provided = True
+        elif trig_socket is not None:
+            self._trig_server = None  # Created in run()
+            self._trig_server_provided = False
+        else:
+            raise ValueError("Either trig_receiver or trig_socket must be provided")
+
         self._ring_buffer: Optional[RingBuffer] = None
         self._fanout: Optional[ProxyFanout] = None
-        self._trig_server: Optional[UDSServer] = None
         self._trig_thread: Optional[threading.Thread] = None
 
         self._running = False
@@ -115,8 +149,16 @@ class IngestProcess:
         self._fanout = ProxyFanout(self._proxy_configs)
         self._fanout.set_frame_callback(self._ring_buffer.add_frame)
 
+        # Create TRIG receiver if not provided
+        if self._trig_server is None and self._trig_path is not None:
+            self._trig_server = TransportFactory.create_message_receiver(
+                self._message_transport, self._trig_path
+            )
+
         # Start TRIG server
-        self._trig_server = UDSServer(self._trig_socket)
+        if self._trig_server is None:
+            logger.error("No TRIG receiver available")
+            return
         self._trig_server.start()
 
         # Start TRIG handler thread
@@ -129,7 +171,7 @@ class IngestProcess:
 
         logger.info(f"Ingest process started")
         logger.info(f"  Source: {self._source}")
-        logger.info(f"  TRIG socket: {self._trig_socket}")
+        logger.info(f"  TRIG receiver: {self._trig_path or 'provided'}")
         logger.info(f"  Clip output: {self._clip_output_dir}")
         logger.info(f"  Proxy outputs: {len(self._proxy_configs)}")
 
@@ -240,7 +282,8 @@ class IngestProcess:
 
         if self._trig_server:
             self._trig_server.stop()
-            self._trig_server = None
+            if not self._trig_server_provided:
+                self._trig_server = None
 
         if self._ring_buffer:
             self._ring_buffer.close()

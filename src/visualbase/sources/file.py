@@ -8,6 +8,7 @@ import cv2
 from visualbase.core.frame import Frame
 from visualbase.core.timestamp import pts_to_ns, ns_to_pts
 from visualbase.sources.base import BaseSource
+from visualbase.sources.decoder import configure_capture
 
 
 class FileSource(BaseSource):
@@ -15,10 +16,14 @@ class FileSource(BaseSource):
 
     Args:
         path: Path to the video file.
+        decoder: Video decoder to use ("auto", "nvdec", "vaapi", "cpu").
+                 Default is "auto" which tries hardware acceleration first.
     """
 
-    def __init__(self, path: Union[str, Path]):
+    def __init__(self, path: Union[str, Path], decoder: str = "auto"):
         self._path = Path(path)
+        self._decoder = decoder
+        self._actual_decoder: str = "cpu"
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame_id: int = 0
         self._fps: float = 0.0
@@ -32,7 +37,10 @@ class FileSource(BaseSource):
         if not self._path.exists():
             raise IOError(f"Video file not found: {self._path}")
 
-        self._cap = cv2.VideoCapture(str(self._path))
+        self._cap, self._actual_decoder = configure_capture(
+            str(self._path),
+            decoder=self._decoder,
+        )
         if not self._cap.isOpened():
             raise IOError(f"Failed to open video file: {self._path}")
 
@@ -120,3 +128,8 @@ class FileSource(BaseSource):
     def duration_sec(self) -> float:
         """Total duration in seconds."""
         return self._duration_ns / 1_000_000_000
+
+    @property
+    def decoder(self) -> str:
+        """Actual decoder being used (after open)."""
+        return self._actual_decoder

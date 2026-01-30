@@ -10,6 +10,7 @@ import cv2
 
 from visualbase.core.frame import Frame
 from visualbase.sources.base import BaseSource
+from visualbase.sources.decoder import configure_capture
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class RTSPSource(BaseSource):
         timeout_sec: Connection timeout in seconds (default: 10).
         reconnect: Whether to auto-reconnect on connection loss (default: True).
         reconnect_delay_sec: Delay between reconnection attempts (default: 5).
+        decoder: Video decoder to use ("auto", "nvdec", "vaapi", "cpu").
 
     Example:
         >>> source = RTSPSource("rtsp://192.168.1.100:554/stream")
@@ -47,12 +49,15 @@ class RTSPSource(BaseSource):
         timeout_sec: float = 10.0,
         reconnect: bool = True,
         reconnect_delay_sec: float = 5.0,
+        decoder: str = "auto",
     ):
         self._url = url
         self._buffer_size = buffer_size
         self._timeout_sec = timeout_sec
         self._reconnect = reconnect
         self._reconnect_delay_sec = reconnect_delay_sec
+        self._decoder = decoder
+        self._actual_decoder: str = "cpu"
 
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame_id: int = 0
@@ -96,8 +101,11 @@ class RTSPSource(BaseSource):
 
     def _connect(self) -> None:
         """Establish connection to the RTSP stream."""
-        # Set up environment for low-latency RTSP
-        self._cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
+        # Use decoder configuration for hardware acceleration
+        self._cap, self._actual_decoder = configure_capture(
+            self._url,
+            decoder=self._decoder,
+        )
 
         # Configure for low latency
         self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -260,3 +268,8 @@ class RTSPSource(BaseSource):
     def is_connected(self) -> bool:
         """Whether the stream is currently connected."""
         return self._connected
+
+    @property
+    def decoder(self) -> str:
+        """Actual decoder being used."""
+        return self._actual_decoder

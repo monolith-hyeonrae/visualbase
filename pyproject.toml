@@ -13,6 +13,13 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
 ]
+zmq = [
+    "pyzmq>=25.0.0",
+]
+webrtc = [
+    "aiortc>=1.6.0",
+    "aiohttp>=3.9.0",
+]
 
 [project.scripts]
 visualbase = "visualbase.cli:main"

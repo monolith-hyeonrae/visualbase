@@ -23,6 +23,7 @@ from visualbase.ipc import (
 )
 from visualbase.streaming import ProxyFanout, ProxyConfig
 from visualbase.process import IngestProcess
+from visualbase.daemon import VideoDaemon
 
 __all__ = [
     # Main API
@@ -59,4 +60,13 @@ __all__ = [
     "ProxyConfig",
     # Process (Phase 8)
     "IngestProcess",
+    # Daemon (Phase 8.7)
+    "VideoDaemon",
 ]
+
+# Optional WebRTC (requires aiortc, aiohttp)
+try:
+    from visualbase.webrtc import WebRTCServer
+    __all__.append("WebRTCServer")
+except ImportError:
+    pass  # WebRTC dependencies not installed

@@ -1,8 +1,9 @@
 """IPC (Inter-Process Communication) module for A-B*-C architecture.
 
-This module provides Unix-native IPC primitives:
+This module provides IPC primitives for inter-process communication:
 - FIFO: Named pipes for video stream fan-out (A→B*)
 - UDS: Unix Domain Sockets for message passing (B*→C, C→A)
+- ZMQ: ZeroMQ PUB/SUB for dynamic connections (optional, requires pyzmq)
 - Messages: OBS/TRIG message parsing and serialization
 - Interfaces: ABCs for swappable transport implementations
 - Factory: Unified transport creation
@@ -19,10 +20,9 @@ Example using interfaces (recommended for production code):
     >>> reader = TransportFactory.create_video_reader("fifo", "/tmp/vid.mjpg")
     >>> process_frames(reader)
 
-Example using concrete classes (fine for direct usage):
-    >>> from visualbase.ipc import FIFOVideoReader, UDSClient
-    >>> reader = FIFOVideoReader("/tmp/vid.mjpg")
-    >>> client = UDSClient("/tmp/obs.sock")
+Example using ZMQ (requires: uv sync --extra zmq):
+    >>> reader = TransportFactory.create_video_reader("zmq", "tcp://localhost:5555")
+    >>> writer = TransportFactory.create_video_writer("zmq", "tcp://*:5555")
 """
 
 # Interfaces (ABCs)
@@ -74,3 +74,20 @@ __all__ = [
     "PoseOBS",
     "QualityOBS",
 ]
+
+# Optional ZMQ transports (requires pyzmq)
+try:
+    from visualbase.ipc.zmq_transport import (
+        ZMQVideoPublisher,
+        ZMQVideoSubscriber,
+        ZMQMessagePublisher,
+        ZMQMessageSubscriber,
+    )
+    __all__.extend([
+        "ZMQVideoPublisher",
+        "ZMQVideoSubscriber",
+        "ZMQMessagePublisher",
+        "ZMQMessageSubscriber",
+    ])
+except ImportError:
+    pass  # pyzmq not installed

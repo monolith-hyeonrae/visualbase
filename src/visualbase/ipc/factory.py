@@ -12,8 +12,9 @@ Example:
     >>> server = TransportFactory.create_message_receiver("uds", "/tmp/obs.sock")
     >>> client = TransportFactory.create_message_sender("uds", "/tmp/obs.sock")
 
-    >>> # Future: ZMQ transports
+    >>> # Create ZMQ-based transports (requires pyzmq)
     >>> reader = TransportFactory.create_video_reader("zmq", "tcp://localhost:5555")
+    >>> writer = TransportFactory.create_video_writer("zmq", "tcp://*:5555")
 """
 
 from typing import Optional, Any, Dict
@@ -30,19 +31,33 @@ from visualbase.ipc.uds import UDSServer, UDSClient
 
 logger = logging.getLogger(__name__)
 
+# Try to import ZMQ transports (optional dependency)
+try:
+    from visualbase.ipc.zmq_transport import (
+        ZMQVideoPublisher,
+        ZMQVideoSubscriber,
+        ZMQMessagePublisher,
+        ZMQMessageSubscriber,
+    )
+    HAS_ZMQ = True
+except ImportError:
+    HAS_ZMQ = False
+
 
 class TransportFactory:
     """Factory for creating IPC transport instances.
 
     Provides static methods to create transport implementations by type.
-    Supports FIFO/UDS transports now, with ZMQ planned for future.
+    Supports FIFO/UDS transports, with optional ZMQ support.
 
     Supported transport types:
         Video (VideoReader/VideoWriter):
             - "fifo": Named pipe (FIFO) based transport
+            - "zmq": ZeroMQ PUB/SUB transport (requires pyzmq)
 
         Message (MessageReceiver/MessageSender):
             - "uds": Unix Domain Socket datagram transport
+            - "zmq": ZeroMQ PUB/SUB transport (requires pyzmq)
     """
 
     # Registry of video transport implementations
@@ -62,6 +77,13 @@ class TransportFactory:
     _message_senders: Dict[str, type] = {
         "uds": UDSClient,
     }
+
+    # Register ZMQ transports if available
+    if HAS_ZMQ:
+        _video_readers["zmq"] = ZMQVideoSubscriber
+        _video_writers["zmq"] = ZMQVideoPublisher
+        _message_receivers["zmq"] = ZMQMessageSubscriber
+        _message_senders["zmq"] = ZMQMessagePublisher
 
     @classmethod
     def create_video_reader(
